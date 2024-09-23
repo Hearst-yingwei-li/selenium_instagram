@@ -9,24 +9,25 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException
 from datetime import datetime
+import asyncio
 import pytz
 
 ACCESS_TOKEN = 'IGQWRNTExZAcEZAzV3FuU0g3NWJKMnhzRW9tZAkV4eUtHZA1JYZA0hWaEp6Y183MmJneHNSUEpSeklVQXBBQktzcnl5aEtPUDVSU0pwUjA2a3ZAqQnFmMjdRbGFPR3YzM0lyd3Q3ZAHo2b01CY1JhZA1lkbmxRbjVlVldfZA3cZD'
 posts_url = f'https://graph.instagram.com/me/media?fields=id,timestamp,children&access_token={ACCESS_TOKEN}'
-start_date_str = '2024-07-16'
+end_date_str = '2024-09-20'
 posts_by_days = []
 instagram_url = 'https://www.instagram.com/hodinkeejapan/'
 TAG_END_OF_LOOP = 'END'
+obj_post_data = {}
 
 def get_dom_post_urls(driver):
     post_links = []
     mainDiv = driver.find_element(By.XPATH,"//main[@role='main']")
     mainChildContainer = mainDiv.find_elements(By.XPATH,"./div") 
-    print(len(mainChildContainer))
     postContainer = mainChildContainer[0].find_elements(By.XPATH,"./div")[-1]
     postStyleDiv = postContainer.find_elements(By.XPATH,"./div")[0]
     postRowContainer = postStyleDiv.find_elements(By.XPATH,"./div") 
-    print(len(postRowContainer))
+    print(f'row count --- {len(postRowContainer)}')
 
     for div_row in postRowContainer:
         divs = div_row.find_elements(By.XPATH, "div")
@@ -37,8 +38,8 @@ def get_dom_post_urls(driver):
                 a_tag = a_tags[0]
                 href = a_tag.get_attribute("href")
                 post_links.append(href)
-    print(post_links)
-    print(len(post_links))
+    # print(post_links)
+    print(f'dom post count ----- {len(post_links)}')
     row_height = driver.execute_script("return arguments[0].getBoundingClientRect().height;",postRowContainer[0])
     print(f'row height = {row_height}')
     return post_links,len(postRowContainer),row_height
@@ -136,10 +137,10 @@ def parse_profile(div_profile_container):
         json_profile[key_div.text] = value_div.text
     return json_profile
 
-async def get_post_data(driver,link):
+async def get_post_insight_data(driver,link):
     timezone = pytz.timezone('UTC')
-    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-    start_date = timezone.localize(start_date)
+    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+    end_date = timezone.localize(end_date)
     #
     json_output = []
     home_window = driver.current_window_handle
@@ -150,19 +151,20 @@ async def get_post_data(driver,link):
         EC.presence_of_element_located((By.TAG_NAME, "time"))
     )
     date_time = time_tag.get_attribute("datetime")
-    date_time = datetime.strptime(date_time, "%Y-%m-%d")
-    date_time = timezone.localize(date_time)
-    print(f'target date - {date_time}   post date -- {date_time}')
+    date_time = datetime.fromisoformat(date_time.replace('Z','+00:00'))
+    print(f'-------- start date - {end_date}   post date -- {date_time} --------')
     # check post date
-    if date_time > start_date:
+    if date_time < end_date:
         driver.close()
         driver.switch_to.window(home_window)
         return TAG_END_OF_LOOP
 
     try:
+        # TODO: wait for all element in page is rendered!
+        # error sometimes the count_sperator is 2, seems because not all element is rendered~~
         insight_button = WebDriverWait(driver,5).until(EC.element_to_be_clickable((By.XPATH,"//div[@role='button' and text()='インサイトを見る']")))
-        print(insight_button.text)
-        print(insight_button.is_enabled())
+        # print(insight_button.text)
+        # print(insight_button.is_enabled())
         driver.execute_script("arguments[0].click();",insight_button)
         WebDriverWait(driver, 10).until(EC.url_contains('insights'))
                 
@@ -170,7 +172,9 @@ async def get_post_data(driver,link):
         hr_separators = WebDriverWait(driver, 5).until(
             EC.presence_of_all_elements_located((By.XPATH,"//hr"))
         )
+        
         count_sperator = len(hr_separators)
+        print(f'<<<<<<<< count separators ----- {count_sperator}')
         if count_sperator == 7:
             main_separators = [hr_separators[2],hr_separators[5],hr_separators[6]]
         else:
@@ -187,7 +191,7 @@ async def get_post_data(driver,link):
         json_output.append(parse_interaction(div_interaction_container)) 
         json_output.append(parse_profile(div_profile_container)) 
         
-        print(json_output)
+        # print(json_output)
         driver.close()
         driver.switch_to.window(home_window)
         return json_output
@@ -195,15 +199,56 @@ async def get_post_data(driver,link):
         driver.close()
         driver.switch_to.window(home_window)
         return None
+    
+def check_scroll_to_end(post_url_list):
+    # If both post_url_list is empty and obj_post_data is empty, 
+    # if not post_url_list and not obj_post_data:
+    #     return False
+    if not post_url_list:
+        return True
+    for link in post_url_list:
+        if link not in obj_post_data.keys():
+            return False
+    return True
+        
 
 '''
 get post rows from dom, get post info
 if get_post_data returns [TAG_END_OF_LOOP], terminate loop
 if loop over whole list, scroll page , call this function again
 '''
-def get_dom_posts():
+async def get_dom_post_info(driver):
+    post_url_list,row_counts,row_height = get_dom_post_urls(driver)
+    # check if all post exists in final list, if so means that there are no more data
+    print(f'post dom list --- {post_url_list}')
+    scroll_to_end = check_scroll_to_end(post_url_list)
+    if scroll_to_end == True:
+        print(f'<<< srcoll to end ------ {obj_post_data}')
+        return
+    
+    scroll_for_more = True
+    for link in post_url_list:
+        print(f"\nhref == {link}")
+        insight_data = await get_post_insight_data(driver,link)
+        if insight_data == TAG_END_OF_LOOP:
+            # reach target date, terminate loop
+            scroll_for_more = False
+            print(f'<<< get to target date ------ {obj_post_data}')
+            break
+        elif insight_data == None:
+            continue
+        else:
+            obj_post_data[link] = insight_data
+            
+    
+    if scroll_for_more == True:
+        #scroll page
+        scroll_distance = row_counts * row_height
+        driver.execute_script(f"window.scrollBy(0,{scroll_distance});")
+        get_dom_post_info(driver)
     pass
-def run():
+
+async def run():
     # start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
     # timezone = pytz.timezone('UTC')
     # start_date = timezone.localize(start_date)
@@ -238,79 +283,8 @@ def run():
 
     # Now you can access the already opened Chrome session
     print(driver.title)  # Print the title of the currently opened page
-    post_url_list,row_counts,row_height = get_dom_post_urls(driver)
-    scroll_distance = row_counts * row_height
-    driver.execute_script(f"window.scrollBy(0,{scroll_distance});")
-
-    # post_info = {}
-    # count = 0
-    # target = 41
-    # post_url_list = get_dom_post_urls(driver)
-    # for url in post_url_list:
-    #     if url in post_info.keys():
-    #         continue
-    #     post_info[url] = f'Test: {url}'
-    #     count += 1
-    #     # get url content - date
-    #     # if data is earlier than target date,
-    # if count < target:
-    #     # scroll page
-    #     pass
+    await get_dom_post_info(driver)
     pass
 
-
-
-
-
-    
-
-# def request_posts(page_url,start_date):
-#     global posts_by_days
-#     response = requests.get(page_url)
-#     if response.status_code == 200:
-#         # Parse the JSON response
-#         data = response.json()
-#         posts = data['data']
-
-#         last = posts[len(posts)-1]
-#         last_timestamp_str = last['timestamp']
-#         last_timestamp = datetime.strptime(last_timestamp_str, "%Y-%m-%dT%H:%M:%S%z")
-#         print(last_timestamp)
-#         print(start_date)
-#         print(last_timestamp > start_date)
-#         if last_timestamp > start_date:
-#             # concate
-#             posts_by_days = posts_by_days + posts
-#             # request next page
-#             paging = data['paging']
-#             next_page_url = paging['next']
-#             request_posts(next_page_url,start_date)
-#         else:
-#             for post in posts:
-#                 post_timestamp_str = post['timestamp']
-#                 post_timestamp = datetime.strptime(post_timestamp_str, "%Y-%m-%dT%H:%M:%S%z")
-#                 if post_timestamp >= start_date:
-#                    posts_by_days.append(post) 
-#                 else:
-#                     break
-#     else:
-#         # Print the error if the request was not successful
-#         print(f"Error: {response.status_code}")
-#         print(response.json())
-
-# def get_post_total():
-#     # loop over target_list,if 'children' exist - plus children length, if not exist, plus one 
-#     global posts_by_days
-#     total_posts = 0
-#     for posts in posts_by_days:
-#         if 'children' in posts.keys():
-#             children_data = posts['children']['data']
-#             total_posts = total_posts + len(children_data)
-#         else:
-#             total_posts = total_posts + 1
-            
-    
-#     return total_posts
-
 if __name__ == "__main__":
-    run()
+    asyncio.run(run())
