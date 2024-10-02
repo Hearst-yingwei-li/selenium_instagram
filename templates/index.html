@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Home Page</title>
+</head>
+
+<body>
+    <h1>Data Extraction</h1>
+    <form id = 'extract-form'>
+        <select id="dropdown-media">
+            <option value="hodinkee">hodinkee</option>
+            <option value="ELLE beauty">ELLE beauty</option>
+        </select>
+
+        <label for="startDate">Start Date:</label><br>
+        <input type="date" id="startDate" name="startDate" required><br><br>
+
+        <label for="endDate">End Date:</label><br>
+        <input type="date" id="endDate" name="endDate" required><br><br>
+        
+        <!-- <button onclick="getContentInfo()"> Get Content Info </button> -->
+        <button type="button" onclick="executeExtraction()">Execute</button>
+    </form>
+
+    <p id="status"></p>
+    <!-- <script src="{{ url_for('static', filename='js/api.js') }}"></script> -->
+    <script>
+        async function executeExtraction() {
+            const media = document.getElementById('dropdown-media').value;
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const response = await fetch('/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({media, startDate, endDate })
+            });
+
+            const result = await response.json();
+            document.getElementById('status').textContent = result.message;
+        }
+    </script>
+</body>
+</html>
