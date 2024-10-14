@@ -5,7 +5,7 @@ a = Analysis(
     ['gui.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('client_secret.json', '.')],
     hiddenimports=['babel.numbers'],
     hookspath=[],
     hooksconfig={},
