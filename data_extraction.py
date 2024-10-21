@@ -1,3 +1,5 @@
+import argparse
+import asyncio
 import time
 import re
 import random
@@ -9,18 +11,12 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import NoSuchElementException
 from datetime import datetime
 import pytz
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.exceptions import GoogleAuthError
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 import unicodedata
 import json
 import os
-import sys
-
-
 import logging
 
 # Configure logging to write to a file
@@ -30,8 +26,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-# ACCESS_TOKEN = 'IGQWRNTExZAcEZAzV3FuU0g3NWJKMnhzRW9tZAkV4eUtHZA1JYZA0hWaEp6Y183MmJneHNSUEpSeklVQXBBQktzcnl5aEtPUDVSU0pwUjA2a3ZAqQnFmMjdRbGFPR3YzM0lyd3Q3ZAHo2b01CY1JhZA1lkbmxRbjVlVldfZA3cZD'
-# posts_url = f'https://graph.instagram.com/me/media?fields=id,timestamp,children&access_token={ACCESS_TOKEN}'
 TAG_END_OF_LOOP = "END"
 # TODO:FIXME:
 SPREAD_SHEET_NAME = "test_instagram"
@@ -51,7 +45,26 @@ list_skip = []
 sleep_needed = True
 creds = None
 
+def is_pin_post(post_div):
+    try:
+        svg_element = WebDriverWait(post_div,5).until(
+            EC.presence_of_element_located((By.TAG_NAME,"svg"))
+        )
+        aria_label = svg_element.get_attribute('aria-label')
+        # svg_element = post_div.find_element(By.XPATH,".//svg[@aria-label='固定された投稿のアイコン']")
+        return aria_label == '固定された投稿のアイコン'
+    except NoSuchElementException:
+        print('NoSuchElementException: pin post icon')
+        logging.debug('NoSuchElementException: pin post icon')
+        return False
+    except TimeoutException:
+        print('TimeoutException: pin post icon')
+        logging.debug('TimeoutException: pin post icon')
+        return False
+    
 
+# get all post link
+# check pin status
 async def get_dom_post_urls(driver):
     post_links = []
     try:
@@ -69,11 +82,14 @@ async def get_dom_post_urls(driver):
             divs = div_row.find_elements(By.XPATH, "div")
             # print(f"Number of <div> elements in each row: {len(divs)}")
             for div in divs:
+                is_pin = is_pin_post(div)
+                # TODO: check PIN status
                 a_tags = div.find_elements(By.TAG_NAME, "a")
                 if len(a_tags) > 0:
                     a_tag = a_tags[0]
                     href = a_tag.get_attribute("href")
-                    post_links.append(href)
+                    obj_url = {'is_pin':is_pin,'url':href}
+                    post_links.append(obj_url)
         # print(post_links)
         # print(f'dom post count ----- {len(post_links)}')
         row_height = driver.execute_script(
@@ -83,6 +99,7 @@ async def get_dom_post_urls(driver):
         # TODO: Should be a dict {url,isPined} - For pined post, even if it's post date is not in the start-end time range, instead of return TAG_END_OF_LOOP ,should let the loop go on
         return post_links, row_height, position_y if position_y > 0 else 0
     except TimeoutException:
+        logging.debug('time out exception : get dom post url')
         return [], 285, 0
 
 
@@ -106,7 +123,8 @@ def get_view_data(div_view_container, xpath):
         )
         return {normalize_key("ビュー"): parseNumber(view_total.text)}
     except TimeoutException:
-        print("element timeout: ビュー")
+        print("element timeout: view - ビュー")
+        logging.debug("element timeout: view - ビュー")
         return None
 
 
@@ -128,7 +146,8 @@ def get_view_follower(div_view_container, xpath, is_reel):
         else:
             return {normalize_key("ビューフォロワー"): parseNumber(per_follower.text)}
     except TimeoutException:
-        print("element timeout: ビューフォロワー")
+        print("element timeout: view follower - ビューフォロワー")
+        logging.debug("element timeout: view follower - ビューフォロワー")
         return None
 
 
@@ -156,7 +175,8 @@ def get_view_unfollower(div_view_container, xpath, is_reel):
                 normalize_key("ビューフォロワー以外"): parseNumber(per_unfollower.text)
             }
     except TimeoutException:
-        print("element timeout: ビューフォロワー以外")
+        print("element timeout exception: view unfollower - ビューフォロワー以外")
+        logging.debug("element timeout exception: view unfollower - ビューフォロワー以外")
         return None
 
 
@@ -169,7 +189,8 @@ def get_reach_count(div_view_container, xpath):
         reach_value = reach_count_div.find_element(By.XPATH, "./div/span")
         return {normalize_key(reach_key.text): parseNumber(reach_value.text)}
     except TimeoutException:
-        print("element timeout: リーチしたアカウント数")
+        print("element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント")
+        logging.debug("element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント")
         return None
 
 
@@ -179,20 +200,35 @@ def get_view_source(div_view_container, xpath):
         view_source_div = WebDriverWait(div_view_container, 5).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
+        if view_source_div is None:
+            print("No such element: view_source_div")
+            logging.debug("No such element: view_source_div")
+            return None
         view_source_contents = view_source_div.find_elements(By.XPATH, "./div")
-        for content in view_source_contents:
-            key_div = content.find_element(By.XPATH, "./div/div[1]/span")
-            value_div = content.find_element(By.XPATH, "./div/div[2]/span")
-            data[normalize_key(key_div.text)] = parseNumber(value_div.text)
-        return data
+        logging.debug(f'get view source ---- view source contents = {view_source_contents}')
+        if view_source_contents is not None:
+            for content in view_source_contents:
+                key_div = content.find_element(By.XPATH, "./div/div[1]/span")
+                value_div = content.find_element(By.XPATH, "./div/div[2]/span")
+                data[normalize_key(key_div.text)] = parseNumber(value_div.text)
+            return data
+        else:
+            print("No such element: view_source_contents")
+            logging.debug("No such element: view_source_contents")
+            return None
     except TimeoutException:
-        print("element timeout: リーチしたアカウント数")
+        print("element timeout: view source container div")
+        logging.debug("element timeout: view source container div")
         return None
 
 
 def parse_view(div_view_container, count_sperator):
     json_view = {}
     if count_sperator == 7:
+        view_wrapper_div = WebDriverWait(div_view_container, 5).until(
+            EC.presence_of_element_located((By.XPATH, './div/div'))
+        )
+        # TODO: div_view_container --> view_wrapper_div
         view_data = get_view_data(div_view_container, "./div/div/div[2]/div/span")
 
         view_follower_data = get_view_follower(
@@ -205,35 +241,6 @@ def parse_view(div_view_container, count_sperator):
             div_view_container, f"./div/div/div[{count_sperator}]"
         )
         json_view.update(get_view_source(div_view_container, "./div/div/div[5]"))
-
-        # view_total = div_view_container.find_element(
-        #     By.XPATH, "./div/div/div[2]/div/span"
-        # )
-        # json_view["ビュー"] = parseNumber(view_total.text)
-
-        # per_follower = div_view_container.find_element(
-        #     By.XPATH, "./div/div/div[3]/div[2]"
-        # )
-        # json_view["ビューフォロワー"] = parseNumber(per_follower.text)
-
-        # per_unfollower = div_view_container.find_element(
-        #     By.XPATH, "./div/div/div[3]/div[4]"
-        # )
-        # json_view["ビューフォロワー以外"] = parseNumber(per_unfollower.text)
-        #
-        # view_source_div = div_view_container.find_element(By.XPATH, "./div/div/div[5]")
-        # view_source_contents = view_source_div.find_elements(By.XPATH, "./div")
-        # for content in view_source_contents:
-        #     key_div = content.find_element(By.XPATH, "./div/div[1]/span")
-        #     value_div = content.find_element(By.XPATH, "./div/div[2]/span")
-        #     json_view[key_div.text] = parseNumber(value_div.text)
-        #
-        # reach_count_div = div_view_container.find_element(
-        #     By.XPATH, f"./div/div/div[{count_sperator}]"
-        # )
-        # reach_key = reach_count_div.find_element(By.XPATH, "./span")
-        # reach_value = reach_count_div.find_element(By.XPATH, "./div/span")
-        # json_view[reach_key.text] = parseNumber(reach_value.text)
     else:
         view_data = get_view_data(
             div_view_container, "./div/div[2]/div/div[1]/div/span"
@@ -249,36 +256,6 @@ def parse_view(div_view_container, count_sperator):
             is_reel=True,
         )
         reach_data = get_reach_count(div_view_container, "./div/div[2]/div/div[4]")
-
-        # view_total = div_view_container.find_element(
-        #     By.XPATH, "./div/div[2]/div/div[1]/div/span"
-        # )
-        # json_view["ビュー"] = parseNumber(view_total.text)
-
-        # per_follower_div = div_view_container.find_element(
-        #     By.XPATH, "./div/div[2]/div/div[2]/div[2]"
-        # )
-        # if re.search(r"\d", per_follower_div.text) or "%" in per_follower_div.text:
-        #     json_view["ビューフォロワー"] = parseNumber(per_follower_div.text)
-        # else:
-        #     per_follower = per_follower_div.find_element(By.XPATH, "./div")
-        #     json_view["ビューフォロワー"] = parseNumber(per_follower.text)
-
-        # per_unfollower_div = div_view_container.find_element(
-        #     By.XPATH, "./div/div[2]/div/div[2]/div[4]"
-        # )
-        # if re.search(r"\d", per_unfollower_div.text) or "%" in per_unfollower_div.text:
-        #     json_view["ビューフォロワー以外"] = parseNumber(per_unfollower_div.text)
-        # else:
-        #     per_unfollower = per_unfollower_div.find_element(By.XPATH, "./div")
-        #     json_view["ビューフォロワー以外"] = parseNumber(per_unfollower.text)
-
-        # reach_count_div = div_view_container.find_element(
-        #     By.XPATH, "./div/div[2]/div/div[4]"
-        # )
-        # reach_key = reach_count_div.find_element(By.XPATH, "./span")
-        # reach_value = reach_count_div.find_element(By.XPATH, "./div/span")
-        # json_view[reach_key.text] = parseNumber(reach_value.text)
     if view_data:
         json_view.update(view_data)
     if view_follower_data:
@@ -446,8 +423,12 @@ def parse_profile(div_profile_container):
         json_profile[normalize_key(key_div.text)] = parseNumber(value_div.text)
     return json_profile
 
+def close_current_tab(driver,home_window):
+    driver.close()
+    driver.switch_to.window(home_window)
+    time.sleep(1)
 
-async def get_post_insight_data(driver, link, start_date, end_date):
+async def get_post_insight_data(driver, obj_post, start_date, end_date):
     timezone = pytz.timezone("Asia/Tokyo")
     start_date = timezone.localize(start_date)
     #
@@ -456,6 +437,7 @@ async def get_post_insight_data(driver, link, start_date, end_date):
     json_output = {}
     home_window = driver.current_window_handle
     driver.switch_to.new_window("tab")
+    link = obj_post['url']
     driver.get(link)
     #
     time_tag = WebDriverWait(driver, 5).until(
@@ -470,17 +452,18 @@ async def get_post_insight_data(driver, link, start_date, end_date):
     # check post date
     if date_time > end_date:
         list_skip.append(link)
-        driver.close()
-        driver.switch_to.window(home_window)
-        time.sleep(1)
+        close_current_tab(driver,home_window)
         print(f"--- current time {date_time} > end date {end_date}")
         return None
-
+    # TODO: check if is pin post
     if date_time < start_date:
-        driver.close()
-        driver.switch_to.window(home_window)
-        time.sleep(1)
-        return TAG_END_OF_LOOP
+        is_pin = obj_post['is_pin']
+        if is_pin:
+            close_current_tab(driver,home_window)
+            return None
+        else:
+            close_current_tab(driver,home_window)
+            return TAG_END_OF_LOOP
 
     try:
         # wait for all element in page is rendered!
@@ -526,16 +509,11 @@ async def get_post_insight_data(driver, link, start_date, end_date):
         json_output.update(parse_interaction(div_interaction_container, count_sperator))
         # add entity - profile related
         json_output.update(parse_profile(div_profile_container))
-
-        driver.close()
-        driver.switch_to.window(home_window)
-        time.sleep(1)
+        close_current_tab(driver,home_window)
         return json_output
     except TimeoutException:
         list_skip.append(link)
-        driver.close()
-        driver.switch_to.window(home_window)
-        time.sleep(1)
+        close_current_tab(driver,home_window)
         print(f"<<< time out exception")
         return None
 
@@ -546,43 +524,12 @@ def check_scroll_to_end(post_url_list):
     #     return False
     if not post_url_list:
         return True
-    for link in post_url_list:
+    for obj_post in post_url_list:
+        link = obj_post['url']
         if link not in obj_post_data.keys():
             return False
     return True
 
-
-# async def spreadsheet_oauth():
-#     try:
-#         global creds
-#         if os.path.exists('token.json'):
-#             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-#         if not creds or not creds.valid:
-#             if creds and creds.expired and creds.refresh_token:
-#                 creds.refresh(Request())
-#             else:
-#                 flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-#                 creds = flow.run_local_server(port=0)
-#                 with open('token.json', 'w') as token:
-#                     token.write(creds.to_json())
-
-#         client = gspread.authorize(creds)
-#         return client
-#     except GoogleAuthError as auth_error:
-#         print('Google auth error')
-#         logging.debug('Google auth error')
-#     except requests.exceptions.ConnectionError:
-#         print(
-#             "Network error: Unable to connect to Google servers. Please check your network connection."
-#         )
-#         logging.debug("Network error: Unable to connect to Google servers. Please check your network connection.")
-#     except socket.gaierror:
-#         print("Network error: Could not resolve host. Check your internet connection.")
-#         logging.debug("Network error: Could not resolve host. Check your internet connection.")
-#     except Exception as e:
-#         print(f"An unexpected error occurred: {e}")
-#         logging.debug(f"An unexpected error occurred: {e}")
-#     return None
 
 def get_temp_json_path(media, start_date, end_date):
     # Define the output path relative to the base path
@@ -618,7 +565,7 @@ def check_existing_data(media, start_date, end_date):
         # Open and read the JSON file if it exists
         with open(file_path, "r", encoding='utf-8') as json_file:
             data = json.load(json_file)
-            urls = [list(item.keys())[0] for item in data]
+            urls = list(data.keys())
             list_skip.extend(urls)
         print("File exists, and data is loaded:", data)
         logging.debug(f"File exists, and data is loaded: {list_skip}")
@@ -676,33 +623,36 @@ if loop over whole list, scroll page , call this function again
 
 
 async def get_dom_post_info(
-    driver, sheet_client, media, spreadsheet, start_date, end_date
+    driver, sheet_client, media, spreadsheet, start_date, end_date, is_save
 ):
     # test_link = 'https://www.instagram.com/reel/DAceh2rBHMK/'
     # insight_data = await get_post_insight_data(driver,test_link,start_date,end_date)
     # return
 
     post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
+    
     # print(f'<<< dom post urls -------- {post_url_list}')
 
     # check if all post exists in final list, if so means that there are no more data
     scroll_to_end = check_scroll_to_end(post_url_list)
     if scroll_to_end == True:
-        print(f"\n<<< srcoll to end ------")
+        print("\n<<< srcoll to end ------")
+        logging.debug("\n<<< srcoll to end ------")
         return
 
     # print(f'<<< obj_post_data keys -- {obj_post_data.keys()}')
     scroll_for_more = True
-    for link in post_url_list:
+    for obj_post in post_url_list:
+        link = obj_post['url']
         print(f"\nhref == {link}")
         # print(f'is already processed -- {link in obj_post_data.keys()}')
         if link in obj_post_data.keys() or link in list_skip:
             print(f"link already processed or has no insight or newer than end_date")
             continue
         if sleep_needed:
-            time.sleep(random.randint(5, 15))
+            time.sleep(random.randint(20, 45))
 
-        insight_data = await get_post_insight_data(driver, link, start_date, end_date)
+        insight_data = await get_post_insight_data(driver, obj_post, start_date, end_date)
 
         if insight_data == TAG_END_OF_LOOP:
             # reach target date, terminate loop
@@ -726,10 +676,11 @@ async def get_dom_post_info(
         print(f"----------- scroll for more ----------- ")
         time.sleep(5)
         await get_dom_post_info(
-            driver, sheet_client, media, spreadsheet, start_date, end_date
+            driver, sheet_client, media, spreadsheet, start_date, end_date, is_save
         )
     else:
-        save_to_spreadsheet(sheet_client, media, spreadsheet)
+        if is_save:
+            save_to_spreadsheet(sheet_client, media, spreadsheet)
         pass
 
 
@@ -770,94 +721,90 @@ async def execute(client, media, start_date, end_date):
         # extract post data
         logging.debug("<<< function call: get_dom_post_info")
         await get_dom_post_info(
-            driver, client, media, SPREAD_SHEET_NAME, start_date, end_date
+            driver, client, media, SPREAD_SHEET_NAME, start_date, end_date, is_save=True
         )
 
 
-# async def run():
-#     parser = argparse.ArgumentParser(description="Extract data from website")
-#     parser.add_argument(
-#         "--media",
-#         type=str,
-#         required=True,
-#         help="media name should be same with sheet name",
-#     )
-#     parser.add_argument(
-#         "--startDate", type=str, required=True, help="Start date (YYYY-MM-DD)"
-#     )
-#     parser.add_argument(
-#         "--endDate", type=str, required=True, help="End date (YYYY-MM-DD)"
-#     )
-#     parser.add_argument(
-#         "--spreadsheet",
-#         type=str,
-#         required=False,
-#         help="spreadsheet name",
-#         default="Instagramインサイトデータ更新",
-#     )
+async def run():
+    parser = argparse.ArgumentParser(description="Extract data from website")
+    parser.add_argument(
+        "--media",
+        type=str,
+        required=True,
+        help="media name should be same with sheet name",
+    )
+    parser.add_argument(
+        "--startDate", type=str, required=True, help="Start date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--endDate", type=str, required=True, help="End date (YYYY-MM-DD)"
+    )
+    parser.add_argument(
+        "--spreadsheet",
+        type=str,
+        required=False,
+        help="spreadsheet name",
+        default="Instagramインサイトデータ更新",
+    )
 
-#     # Parse the arguments
-#     args = parser.parse_args()
-#     media = args.media
-#     start_date = args.startDate
-#     end_date = args.endDate
-#     spreadsheet = args.spreadsheet
+    # Parse the arguments
+    args = parser.parse_args()
+    media = args.media
+    start_date = args.startDate
+    end_date = args.endDate
+    spreadsheet = args.spreadsheet
 
-#     # if media == "ELLE JAPAN":
-#     # global sleep_needed
-#     # sleep_needed = True
+    # if media == "ELLE JAPAN":
+    # global sleep_needed
+    # sleep_needed = True
 
-#     # Validate and convert dates
-#     try:
-#         start_date = datetime.strptime(start_date, "%Y-%m-%d")
-#         end_date = datetime.strptime(end_date, "%Y-%m-%d")
-#     except ValueError:
-#         print("Invalid date format. Please use YYYY-MM-DD.")
-#         return
+    # Validate and convert dates
+    try:
+        start_date = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        print("Invalid date format. Please use YYYY-MM-DD.")
+        return
 
-#     # -------------
-#     chrome_options = Options()
-#     chrome_options.add_experimental_option("debuggerAddress", "localhost:9222")
+    # -------------
+    chrome_options = Options()
+    chrome_options.add_experimental_option("debuggerAddress", "localhost:9222")
 
-#     # Specify the path to the chromedriver executable
-#     chrome_driver_path = "C:/Users/ddadmin/Desktop/tools/chromedriver-win64/chromedriver.exe"  # chromedriver path
+    # Specify the path to the chromedriver executable
+    chrome_driver_path = "C:/Users/ddadmin/Desktop/tools/chromedriver-win64/chromedriver.exe"  # chromedriver path
 
-#     # Set up the WebDriver with Chrome options
-#     service = Service(chrome_driver_path)
-#     driver = webdriver.Chrome(service=service, options=chrome_options)
+    # Set up the WebDriver with Chrome options
+    service = Service(chrome_driver_path)
+    driver = webdriver.Chrome(service=service, options=chrome_options)
 
-#     window_handles = driver.window_handles
-#     for handle in window_handles:
-#         # Switch to the tab
-#         driver.switch_to.window(handle)
+    window_handles = driver.window_handles
+    for handle in window_handles:
+        # Switch to the tab
+        driver.switch_to.window(handle)
 
-#         # Check if the current tab is Instagram by inspecting the URL or title
-#         if "instagram.com" in driver.current_url:
-#             print("Found Instagram session")
-#             print(f"Instagram URL: {driver.current_url}")
-#             break
-#         else:
-#             print(f"Other tab URL: {driver.current_url}")
+        # Check if the current tab is Instagram by inspecting the URL or title
+        if "instagram.com" in driver.current_url:
+            print("Found Instagram session")
+            print(f"Instagram URL: {driver.current_url}")
+            break
+        else:
+            print(f"Other tab URL: {driver.current_url}")
 
-#     # Now you can interact with the Instagram session
-#     # Example: Print the page title
-#     print("Page title:", driver.title)
-#     print(driver.title)  # Print the title of the currently opened page
+    # Now you can interact with the Instagram session
+    # Example: Print the page title
+    print("Page title:", driver.title)
+    print(driver.title)  # Print the title of the currently opened page
 
-#     # TODO:FIXME: --------------------------- For test
-#     # client = None
-#     # await get_dom_post_info(
-#     #     driver, client, media, SPREAD_SHEET_NAME, start_date, end_date
-#     # )
-#     # return
-#     client = await spreadsheet_oauth()
-#     time.sleep(5)
-#     if client:
-#         # extract post data
-#         await get_dom_post_info(
-#             driver, client, media, SPREAD_SHEET_NAME, start_date, end_date
-#         )
+    # TODO:FIXME: --------------------------- For test
+    # client = None
+    # await get_dom_post_info(
+    #     driver, client, media, SPREAD_SHEET_NAME, start_date, end_date
+    # )
+    check_existing_data(media, start_date, end_date)
+    await get_dom_post_info(
+            driver, None, media, SPREAD_SHEET_NAME, start_date, end_date, is_save=False
+        )
 
 
-# if __name__ == "__main__":
-#     asyncio.run(run())
+if __name__ == "__main__":
+    asyncio.run(run())
