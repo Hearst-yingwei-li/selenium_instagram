@@ -35,6 +35,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+SLEEP_MIN = 15
+SLEEP_MAX = 35
 #
 obj_post_data = {}
 save_rows = []
@@ -45,35 +47,57 @@ list_skip = []
 sleep_needed = True
 creds = None
 
+
 def is_pin_post(post_div):
     try:
-        svg_element = WebDriverWait(post_div,5).until(
-            EC.presence_of_element_located((By.TAG_NAME,"svg"))
+        svg_element = WebDriverWait(post_div, 5).until(
+            EC.presence_of_element_located((By.TAG_NAME, "svg"))
         )
-        aria_label = svg_element.get_attribute('aria-label')
+        aria_label = svg_element.get_attribute("aria-label")
         # svg_element = post_div.find_element(By.XPATH,".//svg[@aria-label='固定された投稿のアイコン']")
-        return aria_label == '固定された投稿のアイコン'
+        return aria_label == "固定された投稿のアイコン"
     except NoSuchElementException:
-        print('NoSuchElementException: pin post icon')
-        logging.debug('NoSuchElementException: pin post icon')
+        print("NoSuchElementException: pin post icon")
+        logging.debug("NoSuchElementException: pin post icon")
         return False
     except TimeoutException:
-        print('TimeoutException: pin post icon')
-        logging.debug('TimeoutException: pin post icon')
+        print("TimeoutException: pin post icon")
+        logging.debug("TimeoutException: pin post icon")
         return False
-    
+
 
 # get all post link
 # check pin status
 async def get_dom_post_urls(driver):
     post_links = []
     try:
-        mainDiv = driver.find_element(By.XPATH, "//main[@role='main']")
-        mainChildContainer = mainDiv.find_elements(By.XPATH, "./div")
-        postContainer = mainChildContainer[0].find_elements(By.XPATH, "./div")[-1]
-        postStyleDiv = postContainer.find_elements(By.XPATH, "./div")[0]
-        postRowContainer = postStyleDiv.find_elements(By.XPATH, "./div")
+        mainDiv = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.XPATH, "//main[@role='main']"))
+        )
+        mainChildContainer = WebDriverWait(mainDiv, 5).until(
+            EC.presence_of_all_elements_located((By.XPATH, "./div"))
+        )
+        if len(mainChildContainer) == 0:
+            return [], 285, 0
+        post_containers = WebDriverWait(mainChildContainer[0], 5).until(
+            EC.presence_of_all_elements_located((By.XPATH, "./div"))
+        )
+        if len(post_containers) == 0:
+            return [], 285, 0
+        postContainer = post_containers[-1]
+        postStyleDivs = WebDriverWait(postContainer, 5).until(
+            EC.presence_of_all_elements_located((By.XPATH, "./div"))
+        )
+        if len(postStyleDivs) == 0:
+            return [], 285, 0
+        postStyleDiv = postStyleDivs[0]
+        postRowContainer = WebDriverWait(postStyleDiv, 5).until(
+            EC.presence_of_all_elements_located((By.XPATH, "./div"))
+        )
         print(f"row count --- {len(postRowContainer)}")
+        if len(postRowContainer) == 0:
+            return [], 285, 0
+
         position_y = driver.execute_script(
             "return arguments[0].getBoundingClientRect().top;", postRowContainer[0]
         )
@@ -88,7 +112,7 @@ async def get_dom_post_urls(driver):
                 if len(a_tags) > 0:
                     a_tag = a_tags[0]
                     href = a_tag.get_attribute("href")
-                    obj_url = {'is_pin':is_pin,'url':href}
+                    obj_url = {"is_pin": is_pin, "url": href}
                     post_links.append(obj_url)
         # print(post_links)
         # print(f'dom post count ----- {len(post_links)}')
@@ -99,7 +123,7 @@ async def get_dom_post_urls(driver):
         # TODO: Should be a dict {url,isPined} - For pined post, even if it's post date is not in the start-end time range, instead of return TAG_END_OF_LOOP ,should let the loop go on
         return post_links, row_height, position_y if position_y > 0 else 0
     except TimeoutException:
-        logging.debug('time out exception : get dom post url')
+        logging.debug("time out exception : get dom post url")
         return [], 285, 0
 
 
@@ -176,7 +200,9 @@ def get_view_unfollower(div_view_container, xpath, is_reel):
             }
     except TimeoutException:
         print("element timeout exception: view unfollower - ビューフォロワー以外")
-        logging.debug("element timeout exception: view unfollower - ビューフォロワー以外")
+        logging.debug(
+            "element timeout exception: view unfollower - ビューフォロワー以外"
+        )
         return None
 
 
@@ -185,12 +211,22 @@ def get_reach_count(div_view_container, xpath):
         reach_count_div = WebDriverWait(div_view_container, 5).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
-        reach_key = reach_count_div.find_element(By.XPATH, "./span")
-        reach_value = reach_count_div.find_element(By.XPATH, "./div/span")
+        # reach_key = reach_count_div.find_element(By.XPATH, "./span")
+        reach_key = WebDriverWait(reach_count_div, 5).until(
+            EC.presence_of_element_located((By.XPATH, "./span"))
+        )
+        # reach_value = reach_count_div.find_element(By.XPATH, "./div/span")
+        reach_value = WebDriverWait(reach_count_div, 5).until(
+            EC.presence_of_element_located((By.XPATH, "./div/span"))
+        )
         return {normalize_key(reach_key.text): parseNumber(reach_value.text)}
     except TimeoutException:
-        print("element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント")
-        logging.debug("element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント")
+        print(
+            "element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
+        )
+        logging.debug(
+            "element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
+        )
         return None
 
 
@@ -205,7 +241,9 @@ def get_view_source(div_view_container, xpath):
             logging.debug("No such element: view_source_div")
             return None
         view_source_contents = view_source_div.find_elements(By.XPATH, "./div")
-        logging.debug(f'get view source ---- view source contents = {view_source_contents}')
+        logging.debug(
+            f"get view source ---- view source contents = {view_source_contents}"
+        )
         if view_source_contents is not None:
             for content in view_source_contents:
                 key_div = content.find_element(By.XPATH, "./div/div[1]/span")
@@ -226,7 +264,7 @@ def parse_view(div_view_container, count_sperator):
     json_view = {}
     if count_sperator == 7:
         view_wrapper_div = WebDriverWait(div_view_container, 5).until(
-            EC.presence_of_element_located((By.XPATH, './div/div'))
+            EC.presence_of_element_located((By.XPATH, "./div/div"))
         )
         # TODO: div_view_container --> view_wrapper_div
         view_data = get_view_data(div_view_container, "./div/div/div[2]/div/span")
@@ -423,10 +461,12 @@ def parse_profile(div_profile_container):
         json_profile[normalize_key(key_div.text)] = parseNumber(value_div.text)
     return json_profile
 
-def close_current_tab(driver,home_window):
+
+def close_current_tab(driver, home_window):
     driver.close()
     driver.switch_to.window(home_window)
     time.sleep(1)
+
 
 async def get_post_insight_data(driver, obj_post, start_date, end_date):
     timezone = pytz.timezone("Asia/Tokyo")
@@ -437,7 +477,7 @@ async def get_post_insight_data(driver, obj_post, start_date, end_date):
     json_output = {}
     home_window = driver.current_window_handle
     driver.switch_to.new_window("tab")
-    link = obj_post['url']
+    link = obj_post["url"]
     driver.get(link)
     #
     time_tag = WebDriverWait(driver, 5).until(
@@ -452,17 +492,17 @@ async def get_post_insight_data(driver, obj_post, start_date, end_date):
     # check post date
     if date_time > end_date:
         list_skip.append(link)
-        close_current_tab(driver,home_window)
+        close_current_tab(driver, home_window)
         print(f"--- current time {date_time} > end date {end_date}")
         return None
     # TODO: check if is pin post
     if date_time < start_date:
-        is_pin = obj_post['is_pin']
+        is_pin = obj_post["is_pin"]
         if is_pin:
-            close_current_tab(driver,home_window)
+            close_current_tab(driver, home_window)
             return None
         else:
-            close_current_tab(driver,home_window)
+            close_current_tab(driver, home_window)
             return TAG_END_OF_LOOP
 
     try:
@@ -509,11 +549,11 @@ async def get_post_insight_data(driver, obj_post, start_date, end_date):
         json_output.update(parse_interaction(div_interaction_container, count_sperator))
         # add entity - profile related
         json_output.update(parse_profile(div_profile_container))
-        close_current_tab(driver,home_window)
+        close_current_tab(driver, home_window)
         return json_output
     except TimeoutException:
         list_skip.append(link)
-        close_current_tab(driver,home_window)
+        close_current_tab(driver, home_window)
         print(f"<<< time out exception")
         return None
 
@@ -525,7 +565,7 @@ def check_scroll_to_end(post_url_list):
     if not post_url_list:
         return True
     for obj_post in post_url_list:
-        link = obj_post['url']
+        link = obj_post["url"]
         if link not in obj_post_data.keys():
             return False
     return True
@@ -533,22 +573,26 @@ def check_scroll_to_end(post_url_list):
 
 def get_temp_json_path(media, start_date, end_date):
     # Define the output path relative to the base path
-    output_dir = 'outputs'
-    file_path = os.path.join(output_dir, f'{media}_{start_date.strftime("%Y-%m-%d")}_{end_date.strftime("%Y-%m-%d")}.json')
+    output_dir = "outputs"
+    file_path = os.path.join(
+        output_dir,
+        f'{media}_{start_date.strftime("%Y-%m-%d")}_{end_date.strftime("%Y-%m-%d")}.json',
+    )
     return output_dir, file_path
+
 
 # Save extracted post data to local
 def save_post_data_temp(media, start_date, end_date):
-    output_dir,file_path = get_temp_json_path(media, start_date, end_date)
+    output_dir, file_path = get_temp_json_path(media, start_date, end_date)
 
     # Ensure the output directory exists
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     # Proceed to write to the JSON file
-    with open(file_path, 'w', encoding='utf-8') as file:
+    with open(file_path, "w", encoding="utf-8") as file:
         json.dump(obj_post_data, file, ensure_ascii=False, indent=4)
-    
+
     # def save_dict_to_json(data, filename='data.json'):
     # file_path = f'outputs/{media}_{start_date.strftime("%Y-%m-%d")}_{end_date.strftime("%Y-%m-%d")}.json'
     # with open(file_path, "w") as json_file:
@@ -559,11 +603,11 @@ def save_post_data_temp(media, start_date, end_date):
 
 
 def check_existing_data(media, start_date, end_date):
-    _,file_path = get_temp_json_path(media, start_date, end_date)
+    _, file_path = get_temp_json_path(media, start_date, end_date)
     # file_path = f'outputs/{media}_{start_date.strftime("%Y-%m-%d")}_{end_date.strftime("%Y-%m-%d")}.json'
     if os.path.exists(file_path):
         # Open and read the JSON file if it exists
-        with open(file_path, "r", encoding='utf-8') as json_file:
+        with open(file_path, "r", encoding="utf-8") as json_file:
             data = json.load(json_file)
             urls = list(data.keys())
             list_skip.extend(urls)
@@ -630,7 +674,7 @@ async def get_dom_post_info(
     # return
 
     post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
-    
+
     # print(f'<<< dom post urls -------- {post_url_list}')
 
     # check if all post exists in final list, if so means that there are no more data
@@ -643,16 +687,18 @@ async def get_dom_post_info(
     # print(f'<<< obj_post_data keys -- {obj_post_data.keys()}')
     scroll_for_more = True
     for obj_post in post_url_list:
-        link = obj_post['url']
+        link = obj_post["url"]
         print(f"\nhref == {link}")
         # print(f'is already processed -- {link in obj_post_data.keys()}')
         if link in obj_post_data.keys() or link in list_skip:
             print(f"link already processed or has no insight or newer than end_date")
             continue
         if sleep_needed:
-            time.sleep(random.randint(20, 45))
+            time.sleep(random.randint(SLEEP_MIN, SLEEP_MAX))
 
-        insight_data = await get_post_insight_data(driver, obj_post, start_date, end_date)
+        insight_data = await get_post_insight_data(
+            driver, obj_post, start_date, end_date
+        )
 
         if insight_data == TAG_END_OF_LOOP:
             # reach target date, terminate loop
@@ -802,8 +848,8 @@ async def run():
     # )
     check_existing_data(media, start_date, end_date)
     await get_dom_post_info(
-            driver, None, media, SPREAD_SHEET_NAME, start_date, end_date, is_save=False
-        )
+        driver, None, media, SPREAD_SHEET_NAME, start_date, end_date, is_save=False
+    )
 
 
 if __name__ == "__main__":
