@@ -28,19 +28,19 @@ logging.basicConfig(
 
 TAG_END_OF_LOOP = "END"
 # TODO:FIXME:
-SPREAD_SHEET_NAME = "test_instagram"
-# SPREAD_SHEET_NAME = "Instagramインサイトデータ更新"
+SPREAD_SHEET_NAME = "Instagramインサイトデータ更新"
+WEB_DRIVER_WAIT_TIME = 10
+# SPREAD_SHEET_NAME = "Instagramインサイトデータ更新" # "test_instagram"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-SLEEP_MIN = 15
-SLEEP_MAX = 35
+SLEEP_MIN = 30
+SLEEP_MAX = 45
 #
 obj_post_data = {}
 save_rows = []
-# TODO:FIXME:
 list_skip = []
 
 # To avoid Instagram API request restriction (200 api call/hour)
@@ -50,7 +50,7 @@ creds = None
 
 def is_pin_post(post_div):
     try:
-        svg_element = WebDriverWait(post_div, 5).until(
+        svg_element = WebDriverWait(post_div, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.TAG_NAME, "svg"))
         )
         aria_label = svg_element.get_attribute("aria-label")
@@ -58,11 +58,10 @@ def is_pin_post(post_div):
         return aria_label == "固定された投稿のアイコン"
     except NoSuchElementException:
         print("NoSuchElementException: pin post icon")
-        logging.debug("NoSuchElementException: pin post icon")
+        logging.debug("<<< NoSuchElementException: pin post icon")
         return False
     except TimeoutException:
         print("TimeoutException: pin post icon")
-        logging.debug("TimeoutException: pin post icon")
         return False
 
 
@@ -71,10 +70,10 @@ def is_pin_post(post_div):
 async def get_dom_post_urls(driver):
     post_links = []
     try:
-        mainDiv = WebDriverWait(driver, 5).until(
+        mainDiv = WebDriverWait(driver, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, "//main[@role='main']"))
         )
-        mainChildContainer = WebDriverWait(mainDiv, 5).until(
+        mainChildContainer = WebDriverWait(mainDiv, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_all_elements_located((By.XPATH, "./div"))
         )
         if len(mainChildContainer) == 0:
@@ -85,13 +84,13 @@ async def get_dom_post_urls(driver):
         if len(post_containers) == 0:
             return [], 285, 0
         postContainer = post_containers[-1]
-        postStyleDivs = WebDriverWait(postContainer, 5).until(
+        postStyleDivs = WebDriverWait(postContainer, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_all_elements_located((By.XPATH, "./div"))
         )
         if len(postStyleDivs) == 0:
             return [], 285, 0
         postStyleDiv = postStyleDivs[0]
-        postRowContainer = WebDriverWait(postStyleDiv, 5).until(
+        postRowContainer = WebDriverWait(postStyleDiv, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_all_elements_located((By.XPATH, "./div"))
         )
         print(f"row count --- {len(postRowContainer)}")
@@ -123,7 +122,10 @@ async def get_dom_post_urls(driver):
         # TODO: Should be a dict {url,isPined} - For pined post, even if it's post date is not in the start-end time range, instead of return TAG_END_OF_LOOP ,should let the loop go on
         return post_links, row_height, position_y if position_y > 0 else 0
     except TimeoutException:
-        logging.debug("time out exception : get dom post url")
+        logging.debug("<<< time out exception : get dom post url")
+        return [], 285, 0
+    except NoSuchElementException:
+        logging.debug("<<< no such element exception : get dom post url")
         return [], 285, 0
 
 
@@ -142,19 +144,23 @@ def normalize_key(key):
 # === view ===
 def get_view_data(div_view_container, xpath):
     try:
-        view_total = WebDriverWait(div_view_container, 5).until(
+        view_total = WebDriverWait(div_view_container, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         return {normalize_key("ビュー"): parseNumber(view_total.text)}
+    except NoSuchElementException:
+        print("no such element exception: view - ビュー")
+        logging.debug("<<< no such element exception: view - ビュー")
+        return None
     except TimeoutException:
         print("element timeout: view - ビュー")
-        logging.debug("element timeout: view - ビュー")
+        logging.debug("<<< element timeout: view - ビュー")
         return None
 
 
 def get_view_follower(div_view_container, xpath, is_reel):
     try:
-        per_follower = WebDriverWait(div_view_container, 5).until(
+        per_follower = WebDriverWait(div_view_container, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         if is_reel:
@@ -169,15 +175,19 @@ def get_view_follower(div_view_container, xpath, is_reel):
                 }
         else:
             return {normalize_key("ビューフォロワー"): parseNumber(per_follower.text)}
+    except NoSuchElementException:
+        print("no such element exception: view follower - ビューフォロワー")
+        logging.debug("<<< no such element exception: view follower - ビューフォロワー")
+        return None
     except TimeoutException:
         print("element timeout: view follower - ビューフォロワー")
-        logging.debug("element timeout: view follower - ビューフォロワー")
+        logging.debug("<<< element timeout: view follower - ビューフォロワー")
         return None
 
 
 def get_view_unfollower(div_view_container, xpath, is_reel):
     try:
-        per_unfollower = WebDriverWait(div_view_container, 5).until(
+        per_unfollower = WebDriverWait(div_view_container, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         if is_reel:
@@ -198,34 +208,48 @@ def get_view_unfollower(div_view_container, xpath, is_reel):
             return {
                 normalize_key("ビューフォロワー以外"): parseNumber(per_unfollower.text)
             }
+    except NoSuchElementException:
+        print("no such element exception: view unfollower - ビューフォロワー以外")
+        logging.debug(
+            "<<< no such element exception: view unfollower - ビューフォロワー以外"
+        )
+        return None
     except TimeoutException:
         print("element timeout exception: view unfollower - ビューフォロワー以外")
         logging.debug(
-            "element timeout exception: view unfollower - ビューフォロワー以外"
+            "<<< element timeout exception: view unfollower - ビューフォロワー以外"
         )
         return None
 
 
 def get_reach_count(div_view_container, xpath):
     try:
-        reach_count_div = WebDriverWait(div_view_container, 5).until(
+        reach_count_div = WebDriverWait(div_view_container, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         # reach_key = reach_count_div.find_element(By.XPATH, "./span")
-        reach_key = WebDriverWait(reach_count_div, 5).until(
+        reach_key = WebDriverWait(reach_count_div, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, "./span"))
         )
         # reach_value = reach_count_div.find_element(By.XPATH, "./div/span")
-        reach_value = WebDriverWait(reach_count_div, 5).until(
+        reach_value = WebDriverWait(reach_count_div, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, "./div/span"))
         )
         return {normalize_key(reach_key.text): parseNumber(reach_value.text)}
+    except NoSuchElementException:
+        print(
+            "no such element exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
+        )
+        logging.debug(
+            "<<< no such element exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
+        )
+        return None
     except TimeoutException:
         print(
             "element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
         )
         logging.debug(
-            "element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
+            "<<< element timeout exception: reached account/reached account center リーチしたアカウント数/リーチ済みのアカウントセンター内アカウント"
         )
         return None
 
@@ -233,16 +257,16 @@ def get_reach_count(div_view_container, xpath):
 def get_view_source(div_view_container, xpath):
     try:
         data = {}
-        view_source_div = WebDriverWait(div_view_container, 5).until(
+        view_source_div = WebDriverWait(div_view_container, WEB_DRIVER_WAIT_TIME).until(
             EC.presence_of_element_located((By.XPATH, xpath))
         )
         if view_source_div is None:
             print("No such element: view_source_div")
-            logging.debug("No such element: view_source_div")
+            logging.debug("<<< No such element: view_source_div")
             return None
         view_source_contents = view_source_div.find_elements(By.XPATH, "./div")
         logging.debug(
-            f"get view source ---- view source contents = {view_source_contents}"
+            f"<<< get view source ---- view source contents = {view_source_contents}"
         )
         if view_source_contents is not None:
             for content in view_source_contents:
@@ -252,21 +276,21 @@ def get_view_source(div_view_container, xpath):
             return data
         else:
             print("No such element: view_source_contents")
-            logging.debug("No such element: view_source_contents")
+            logging.debug("<<< No such element: view_source_contents")
             return None
+    except NoSuchElementException:
+        print("no such element exception: view source container div")
+        logging.debug("<<< element timeout: view source container div")
+        return None
     except TimeoutException:
-        print("element timeout: view source container div")
-        logging.debug("element timeout: view source container div")
+        print("no such element exception: view source container div")
+        logging.debug("<<< element timeout: view source container div")
         return None
 
 
 def parse_view(div_view_container, count_sperator):
     json_view = {}
     if count_sperator == 7:
-        view_wrapper_div = WebDriverWait(div_view_container, 5).until(
-            EC.presence_of_element_located((By.XPATH, "./div/div"))
-        )
-        # TODO: div_view_container --> view_wrapper_div
         view_data = get_view_data(div_view_container, "./div/div/div[2]/div/span")
 
         view_follower_data = get_view_follower(
@@ -278,7 +302,9 @@ def parse_view(div_view_container, count_sperator):
         reach_data = get_reach_count(
             div_view_container, f"./div/div/div[{count_sperator}]"
         )
-        json_view.update(get_view_source(div_view_container, "./div/div/div[5]"))
+        dict_view_data = get_view_source(div_view_container, "./div/div/div[5]")
+        if dict_view_data:
+            json_view.update(dict_view_data)
     else:
         view_data = get_view_data(
             div_view_container, "./div/div[2]/div/div[1]/div/span"
@@ -311,15 +337,18 @@ def parse_view(div_view_container, count_sperator):
 # === Interaction ===
 def get_interaction_data(interaction_container, xpath_key, xpath_value):
     try:
-        interaction_key = WebDriverWait(interaction_container, 5).until(
-            EC.presence_of_element_located((By.XPATH, xpath_key))
-        )
+        interaction_key = WebDriverWait(
+            interaction_container, WEB_DRIVER_WAIT_TIME
+        ).until(EC.presence_of_element_located((By.XPATH, xpath_key)))
 
-        interaction_value = WebDriverWait(interaction_container, 5).until(
-            EC.presence_of_element_located((By.XPATH, xpath_value))
-        )
+        interaction_value = WebDriverWait(
+            interaction_container, WEB_DRIVER_WAIT_TIME
+        ).until(EC.presence_of_element_located((By.XPATH, xpath_value)))
         # print(f'interaction key = {interaction_key.text}  interaction value = {interaction_value.text}')
         return {normalize_key(interaction_key.text): interaction_value.text}
+    except NoSuchElementException:
+        print("no such element exception: インタラクション")
+        return None
     except TimeoutException:
         print("element timeout: インタラクション")
         return None
@@ -344,12 +373,12 @@ def get_interaction_follower_unfollower_data(
 
 def get_post_interaction_data(post_interaction_div, xpath_key, xpath_value):
     try:
-        post_interaction_key = WebDriverWait(post_interaction_div, 5).until(
-            EC.presence_of_element_located((By.XPATH, xpath_key))
-        )
-        post_interaction_value = WebDriverWait(post_interaction_div, 5).until(
-            EC.presence_of_element_located((By.XPATH, xpath_value))
-        )
+        post_interaction_key = WebDriverWait(
+            post_interaction_div, WEB_DRIVER_WAIT_TIME
+        ).until(EC.presence_of_element_located((By.XPATH, xpath_key)))
+        post_interaction_value = WebDriverWait(
+            post_interaction_div, WEB_DRIVER_WAIT_TIME
+        ).until(EC.presence_of_element_located((By.XPATH, xpath_value)))
         return {
             normalize_key(post_interaction_key.text): parseNumber(
                 post_interaction_value.text
@@ -360,6 +389,9 @@ def get_post_interaction_data(post_interaction_div, xpath_key, xpath_value):
         json_interaction[post_interaction_key.text] = parseNumber(
             post_interaction_value.text
         )
+    except NoSuchElementException:
+        print("no such element exception: インタラクション follower & unfollower")
+        return None
     except TimeoutException:
         print("element timeout: インタラクション follower & unfollower")
         return None
@@ -368,6 +400,12 @@ def get_post_interaction_data(post_interaction_div, xpath_key, xpath_value):
 def parse_interaction(div_interaction_container, count_sperator):
     json_interaction = {}
     div_children = div_interaction_container.find_elements(By.XPATH, "./div/div")
+    if not div_children or len(div_children) < 6:
+        logging.debug(
+            f"<<< error: interaction container childer count == {len(div_children)}"
+        )
+        return json_interaction
+
     interaction_container = div_children[1]
     post_interaction_container = div_children[3]
     action_account_container = div_children[5]
@@ -378,38 +416,18 @@ def parse_interaction(div_interaction_container, count_sperator):
     )
     if interaction_data:
         json_interaction.update(interaction_data)
-    # interaction_key = interaction_container.find_element(By.XPATH, "./div/div[1]/span")
-    # interaction_value = interaction_container.find_element(
-    #     By.XPATH, "./div/div[1]/div/span"
-    # )
-    # json_interaction[interaction_key.text] = parseNumber(interaction_value.text)
 
     follower_data = get_interaction_follower_unfollower_data(
         interaction_container, "./div/div[2]/div[1]/span", "./div/div[2]/div[2]"
     )
     if follower_data:
         json_interaction.update(follower_data)
-    # follower_key = interaction_container.find_element(
-    #     By.XPATH, "./div/div[2]/div[1]/span"
-    # )
-    # follower_value = interaction_container.find_element(By.XPATH, "./div/div[2]/div[2]")
-    # json_interaction[f"インタラクション{follower_key.text}"] = parseNumber(
-    #     follower_value.text
-    # )
+
     unfollower_data = get_interaction_follower_unfollower_data(
         interaction_container, "./div/div[2]/div[3]/span", "./div/div[2]/div[4]"
     )
     if unfollower_data:
         json_interaction.update(unfollower_data)
-    # unfollower_key = interaction_container.find_element(
-    #     By.XPATH, "./div/div[2]/div[3]/span"
-    # )
-    # unfollower_value = interaction_container.find_element(
-    #     By.XPATH, "./div/div[2]/div[4]"
-    # )
-    # json_interaction[f"インタラクション{unfollower_key.text}"] = parseNumber(
-    #     unfollower_value.text
-    # )
 
     # post interaction
     post_children = post_interaction_container.find_elements(By.XPATH, "./div/div")
@@ -420,12 +438,6 @@ def parse_interaction(div_interaction_container, count_sperator):
     )
     if post_interaction_data:
         json_interaction.update(post_interaction_data)
-
-    # post_interaction_key = post_interaction_div.find_element(By.XPATH, "./span")
-    # post_interaction_value = post_interaction_div.find_element(By.XPATH, "./div/span")
-    # json_interaction[post_interaction_key.text] = parseNumber(
-    #     post_interaction_value.text
-    # )
 
     xpath = "./div/" if count_sperator == 7 else "./"
     for element in post_children[1:]:
@@ -443,7 +455,6 @@ def parse_interaction(div_interaction_container, count_sperator):
     action_account_value = action_account_container.find_element(By.XPATH, "./div/span")
     # print(f'action account  key = {action_account_key.text}   value = {action_account_value.text}')
     json_interaction[action_account_key.text] = parseNumber(action_account_value.text)
-
     return json_interaction
 
 
@@ -480,82 +491,113 @@ async def get_post_insight_data(driver, obj_post, start_date, end_date):
     link = obj_post["url"]
     driver.get(link)
     #
-    time_tag = WebDriverWait(driver, 5).until(
-        EC.presence_of_element_located((By.TAG_NAME, "time"))
-    )
-    date_time_str = time_tag.get_attribute("datetime")
-    date_time = datetime.fromisoformat(
-        date_time_str.replace("Z", "+00:00")
-    )  # UTC timezone
-    date_time = date_time.astimezone(timezone)
-    # print(f'get post insight data -------- post date -- {date_time} --------')
-    # check post date
-    if date_time > end_date:
-        list_skip.append(link)
-        close_current_tab(driver, home_window)
-        print(f"--- current time {date_time} > end date {end_date}")
-        return None
-    # TODO: check if is pin post
-    if date_time < start_date:
-        is_pin = obj_post["is_pin"]
-        if is_pin:
-            close_current_tab(driver, home_window)
-            return None
-        else:
-            close_current_tab(driver, home_window)
-            return TAG_END_OF_LOOP
-
+    time.sleep(5)
     try:
-        # wait for all element in page is rendered!
-        # error sometimes the count_sperator is 2, seems because not all element is rendered~~
-        insight_button = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//div[@role='button' and text()='インサイトを見る']")
-            )
+        time_tag = WebDriverWait(driver, WEB_DRIVER_WAIT_TIME).until(
+            EC.presence_of_element_located((By.TAG_NAME, "time"))
         )
-        driver.execute_script("arguments[0].click();", insight_button)
-        print("<<< insight button clicked")
-        WebDriverWait(driver, 10).until(EC.url_contains("insights"))
-        print("<<< url contains - insights")
-
-        time.sleep(5)
-        # find seperators
-        hr_separators = WebDriverWait(driver, 5).until(
-            EC.presence_of_all_elements_located((By.XPATH, "//hr"))
-        )
-        count_sperator = len(hr_separators)
-        if count_sperator == 7:
-            main_separators = [hr_separators[2], hr_separators[5], hr_separators[6]]
-        elif count_sperator == 6:
-            main_separators = [hr_separators[1], hr_separators[4], hr_separators[5]]
-        else:
-            print(
-                f"count_sperator ------- {count_sperator} no enough info is loaded on the website"
-            )
-            time.sleep(1)
+        date_time_str = time_tag.get_attribute("datetime")
+        date_time = datetime.fromisoformat(
+            date_time_str.replace("Z", "+00:00")
+        )  # UTC timezone
+        date_time = date_time.astimezone(timezone)
+        # print(f'get post insight data -------- post date -- {date_time} --------')
+        # check post date
+        if date_time > end_date:
+            list_skip.append(link)
+            close_current_tab(driver, home_window)
+            print(f"--- current time {date_time} > end date {end_date}")
             return None
-        div_separators = [hr.find_element(By.XPATH, "..") for hr in main_separators]
-        div_info_root = div_separators[0].find_element(By.XPATH, "..")
-        div_info_children = div_info_root.find_elements(By.XPATH, "./div")
-        div_view_container = div_info_children[0]
-        div_interaction_container = div_info_children[2]
-        div_profile_container = div_info_children[4]
+        # TODO: check if is pin post
+        if date_time < start_date:
+            is_pin = obj_post["is_pin"]
+            if is_pin:
+                list_skip.append(link)
+                close_current_tab(driver, home_window)
+                return None
+            else:
+                close_current_tab(driver, home_window)
+                return TAG_END_OF_LOOP
 
-        # add entity - Date
-        json_output["Date"] = date_time.strftime("%Y-%m-%d %H:%M:%S")
-        # add entity - view related
-        json_output.update(parse_view(div_view_container, count_sperator))
-        # add entity - interaction related
-        json_output.update(parse_interaction(div_interaction_container, count_sperator))
-        # add entity - profile related
-        json_output.update(parse_profile(div_profile_container))
-        close_current_tab(driver, home_window)
-        return json_output
+        try:
+            # wait for all element in page is rendered
+            # error sometimes the count_sperator is 2, seems because not all element is rendered~~
+            insight_button = WebDriverWait(driver, WEB_DRIVER_WAIT_TIME).until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//div[@role='button' and text()='インサイトを見る']")
+                )
+            )
+            driver.execute_script("arguments[0].click();", insight_button)
+            print("<<< insight button clicked")
+            WebDriverWait(driver, 10).until(EC.url_contains("insights"))
+            print("<<< url contains - insights")
+
+            # find seperators
+            hr_separators = WebDriverWait(driver, WEB_DRIVER_WAIT_TIME).until(
+                EC.presence_of_all_elements_located((By.XPATH, "//hr"))
+            )
+            count_sperator = len(hr_separators)
+            if count_sperator == 7:
+                main_separators = [hr_separators[2], hr_separators[5], hr_separators[6]]
+            elif count_sperator == 6:
+                main_separators = [hr_separators[1], hr_separators[4], hr_separators[5]]
+            else:
+                print(
+                    f"count_sperator ------- {count_sperator} no enough info is loaded on the website"
+                )
+                logging.debug(f'<<< count_sperator ------- {count_sperator} no enough info is loaded on the website')
+                time.sleep(1)
+                close_current_tab(driver, home_window)
+                return None
+            time.sleep(5)
+            div_separators = [hr.find_element(By.XPATH, "..") for hr in main_separators]
+            div_info_root = div_separators[0].find_element(By.XPATH, "..")
+            div_info_children = div_info_root.find_elements(By.XPATH, "./div")
+            div_view_container = div_info_children[0]
+            div_interaction_container = div_info_children[2]
+            div_profile_container = div_info_children[4]
+
+            # add entity - Date
+            json_output["Date"] = date_time.strftime("%Y-%m-%d %H:%M:%S")
+            # add entity - view related
+            dict_view = parse_view(div_view_container, count_sperator)
+            if dict_view:
+                json_output.update(dict_view)
+
+            # add entity - interaction related
+            dict_interaction = parse_interaction(div_interaction_container, count_sperator)
+            if dict_interaction:
+                json_output.update(dict_interaction)
+
+            # add entity - profile related
+            dict_profile = parse_profile(div_profile_container)
+            if dict_profile:
+                json_output.update(dict_profile)
+            close_current_tab(driver, home_window)
+            return json_output
+        except NoSuchElementException:
+            list_skip.append(link)
+            close_current_tab(driver, home_window)
+            print("<<< no such element  exception: insight button")
+            logging.debug("<<< no such element exception: insight button")
+            return None
+        except TimeoutException:
+            list_skip.append(link)
+            close_current_tab(driver, home_window)
+            print("<<< time out exception")
+            logging.debug("<<< timeout exception: insight button")
+            return None
     except TimeoutException:
-        list_skip.append(link)
-        close_current_tab(driver, home_window)
-        print(f"<<< time out exception")
-        return None
+            close_current_tab(driver, home_window)
+            print("<<< time out exception: time")
+            logging.debug("<<< timeout exception: time")
+            return None
+    except NoSuchElementException:
+            close_current_tab(driver, home_window)
+            print("<<< no such element exception: time")
+            logging.debug("<<< no such element exception: time")
+            return None
+
 
 
 def check_scroll_to_end(post_url_list):
@@ -563,6 +605,7 @@ def check_scroll_to_end(post_url_list):
     # if not post_url_list and not obj_post_data:
     #     return False
     if not post_url_list:
+        logging.debug('<<< check_scroll_to_end: post url list is empty')
         return True
     for obj_post in post_url_list:
         link = obj_post["url"]
@@ -598,7 +641,7 @@ def save_post_data_temp(media, start_date, end_date):
     # with open(file_path, "w") as json_file:
     #     json.dump(obj_post_data, json_file, indent=4)
     print(f"Dictionary saved to {file_path}")
-    logging.debug(f"Dictionary saved to {file_path}")
+    logging.debug(f"<<< Dictionary saved to {file_path}")
     pass
 
 
@@ -609,18 +652,18 @@ def check_existing_data(media, start_date, end_date):
         # Open and read the JSON file if it exists
         with open(file_path, "r", encoding="utf-8") as json_file:
             data = json.load(json_file)
+            obj_post_data.update(data)
             urls = list(data.keys())
             list_skip.extend(urls)
         print("File exists, and data is loaded:", data)
-        logging.debug(f"File exists, and data is loaded: {list_skip}")
+        logging.debug(f"<<< File exists, and data is loaded: {list_skip}")
     else:
         print("File does not exist.")
-        logging.debug("File does not exist.")
+        logging.debug("<<< File does not exist.")
 
 
 def save_to_spreadsheet(client, media, spreadsheet):
     print(f"obj_post_data --\n{obj_post_data}")
-    logging.debug(f"obj_post_data --\n{obj_post_data}")
 
     # Open the Google Spreadsheet (replace 'spreadsheet_name' with the actual name)
     # spreadsheet = client.open('Instagramインサイトデータ更新')
@@ -669,11 +712,11 @@ if loop over whole list, scroll page , call this function again
 async def get_dom_post_info(
     driver, sheet_client, media, spreadsheet, start_date, end_date, is_save
 ):
-    # test_link = 'https://www.instagram.com/reel/DAceh2rBHMK/'
-    # insight_data = await get_post_insight_data(driver,test_link,start_date,end_date)
-    # return
-
     post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
+    # try once if dom list is null
+    if not post_url_list:
+        time.sleep(5)
+        post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
 
     # print(f'<<< dom post urls -------- {post_url_list}')
 
@@ -708,7 +751,8 @@ async def get_dom_post_info(
             print(f"<<< insight data is None -----")
             continue
         else:
-            obj_post_data[link] = insight_data
+            # obj_post_data[link] = insight_data
+            obj_post_data.update({link: insight_data})
             save_post_data_temp(media, start_date, end_date)
             print("<<< save post data")
             print(
@@ -720,7 +764,7 @@ async def get_dom_post_info(
         scroll_distance = 3 * row_height + offset_y
         driver.execute_script(f"window.scrollBy(0,{scroll_distance});")
         print(f"----------- scroll for more ----------- ")
-        time.sleep(5)
+        time.sleep(10)
         await get_dom_post_info(
             driver, sheet_client, media, spreadsheet, start_date, end_date, is_save
         )

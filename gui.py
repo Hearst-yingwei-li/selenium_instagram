@@ -13,7 +13,7 @@ import os
 
 
 # Define the path to client_secret.json depending on the environment
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     # If the app is running as a PyInstaller bundle
     base_path = sys._MEIPASS
 else:
@@ -21,7 +21,7 @@ else:
     base_path = os.path.abspath(".")
 
 client_secret_path = os.path.join(base_path, "client_secret.json")
-logging.debug(f'client_secret_path ----- {client_secret_path}')
+logging.debug(f"client_secret_path ----- {client_secret_path}")
 
 # Define the running flag globally
 running = True
@@ -38,16 +38,18 @@ async def execute_script():
     start_date = cal_start.get()
     end_date = cal_end.get()
     ##
-   
+
     if media_name and start_date and end_date:
-         # OAuth 2.0 flow to get the credentials
+        # OAuth 2.0 flow to get the credentials
         flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
         # Authenticate using the credentials.json
         creds = flow.run_local_server(port=0)
         # Authorize the client
         client = gspread.authorize(creds)
         # Here you can call your Python function with the selected parameters
-        logging.debug(f'media_name = {media_name}  start_date = {start_date}  end_date = {end_date}')
+        logging.debug(
+            f"media_name = {media_name}  start_date = {start_date}  end_date = {end_date}"
+        )
         try:
             # convert to DateTime
             start_date = datetime.strptime(start_date, "%Y-%m-%d")
@@ -63,14 +65,17 @@ async def execute_script():
     else:
         messagebox.showerror("Error", "Please fill out all fields.")
 
+
 async def stop_main():
     global running
     running = False
+
 
 def on_button_click():
     # Create and run the async task
     task = asyncio.create_task(execute_script())
     task.add_done_callback(lambda t: asyncio.create_task(stop_main()))
+
 
 # Create main window
 root = tk.Tk()
@@ -81,7 +86,20 @@ media_var = tk.StringVar()
 media_label = tk.Label(root, text="Select Media Name")
 media_label.grid(row=0, column=0, padx=10, pady=10)
 
-media_options = ["hodinkee", "ELLEJAPAN", "ELLEbeauty"]  # Add your media options here
+media_options = [
+    "hodinkee",
+    "ELLEJAPAN",
+    "ELLEbeauty",
+    "ELLEgirl",
+    "ELLEDecor",
+    "ELLEGoumet",
+    "Harper'sBAZAAR",
+    "25ans",
+    "ModernLiving",
+    "Richesse",
+    "EsquireJapan",
+    "Woman'sHealth"
+]  # Add your media options here
 media_dropdown = ttk.OptionMenu(root, media_var, media_options[0], *media_options)
 media_dropdown.grid(row=0, column=1, padx=10, pady=10)
 
@@ -111,17 +129,18 @@ cal_end = DateEntry(
 cal_end.grid(row=2, column=1, padx=10, pady=10)
 
 
-    
 # Create execute button
 execute_button = tk.Button(root, text="Execute", command=on_button_click)
 execute_button.grid(row=3, columnspan=2, pady=20)
+
 
 async def main():
     global running
     while running:
         root.update()  # Run Tkinter events
-        await asyncio.sleep(0.01) # Small sleep to keep the loop running smoothly
-        
+        await asyncio.sleep(0.01)  # Small sleep to keep the loop running smoothly
+
+
 asyncio.run(main())
 # Start the GUI loop
 # root.mainloop()
