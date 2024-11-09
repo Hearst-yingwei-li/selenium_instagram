@@ -13,14 +13,15 @@ import os
 
 
 # Define the path to client_secret.json depending on the environment
-if getattr(sys, "frozen", False):
-    # If the app is running as a PyInstaller bundle
-    base_path = sys._MEIPASS
-else:
-    # If running in a regular Python environment
-    base_path = os.path.abspath(".")
-
-client_secret_path = os.path.join(base_path, "client_secret.json")
+# if getattr(sys, "frozen", False):
+#     # If the app is running as a PyInstaller bundle
+#     base_path = sys._MEIPASS
+# else:
+#     # If running in a regular Python environment
+#     base_path = os.path.abspath(".")
+base_path = os.path.abspath(".")
+root_path = os.path.abspath(os.path.join(base_path, "..", ".."))
+client_secret_path = os.path.join(root_path, "client_secret.json")
 logging.debug(f"client_secret_path ----- {client_secret_path}")
 
 # Define the running flag globally

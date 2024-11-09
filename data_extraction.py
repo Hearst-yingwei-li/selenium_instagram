@@ -3,6 +3,7 @@ import asyncio
 import time
 import re
 import random
+import sys
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -36,8 +37,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-SLEEP_MIN = 30
-SLEEP_MAX = 45
+SLEEP_MIN = 40
+SLEEP_MAX = 55
 #
 obj_post_data = {}
 save_rows = []
@@ -528,6 +529,7 @@ async def get_post_insight_data(driver, obj_post, start_date, end_date):
                 )
             )
             driver.execute_script("arguments[0].click();", insight_button)
+            time.sleep(5)
             print("<<< insight button clicked")
             WebDriverWait(driver, 10).until(EC.url_contains("insights"))
             print("<<< url contains - insights")
@@ -614,9 +616,19 @@ def check_scroll_to_end(post_url_list):
     return True
 
 
+
 def get_temp_json_path(media, start_date, end_date):
     # Define the output path relative to the base path
-    output_dir = "outputs"
+    # if getattr(sys, "frozen", False):
+    #     # If the app is running as a PyInstaller bundle
+    #     base_path = sys._MEIPASS
+    # else:
+    #     # If running in a regular Python environment
+    #     base_path = os.path.abspath(".")
+    base_path = os.path.abspath(".")  
+    root_path = os.path.abspath(os.path.join(base_path, "..", "..")) 
+    output_dir = os.path.join(root_path, "outputs")
+    # output_dir = "outputs"
     file_path = os.path.join(
         output_dir,
         f'{media}_{start_date.strftime("%Y-%m-%d")}_{end_date.strftime("%Y-%m-%d")}.json',
@@ -713,18 +725,19 @@ async def get_dom_post_info(
     driver, sheet_client, media, spreadsheet, start_date, end_date, is_save
 ):
     post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
-    # try once if dom list is null
-    if not post_url_list:
-        time.sleep(5)
-        post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
-
-    # print(f'<<< dom post urls -------- {post_url_list}')
-
     # check if all post exists in final list, if so means that there are no more data
     scroll_to_end = check_scroll_to_end(post_url_list)
+    # try once if dom list is null
+    # if not post_url_list:
+    #     time.sleep(5)
+    #     post_url_list, row_height, offset_y = await get_dom_post_urls(driver)
+        
+    # print(f'<<< dom post urls -------- {post_url_list}')
+
     if scroll_to_end == True:
         print("\n<<< srcoll to end ------")
         logging.debug("\n<<< srcoll to end ------")
+        save_to_spreadsheet(sheet_client, media, spreadsheet)
         return
 
     # print(f'<<< obj_post_data keys -- {obj_post_data.keys()}')
@@ -761,10 +774,10 @@ async def get_dom_post_info(
 
     if scroll_for_more == True:
         # scroll page
-        scroll_distance = 3 * row_height + offset_y
+        scroll_distance = 4 * row_height + offset_y
         driver.execute_script(f"window.scrollBy(0,{scroll_distance});")
         print(f"----------- scroll for more ----------- ")
-        time.sleep(10)
+        time.sleep(5)
         await get_dom_post_info(
             driver, sheet_client, media, spreadsheet, start_date, end_date, is_save
         )
@@ -803,7 +816,7 @@ async def execute(client, media, start_date, end_date):
     print("Page title:", driver.title)
     logging.debug(f"Page title: {driver.title}")
     # Scroll to top to prevent effect from previous process
-    driver.execute_script(f"window.scrollBy(0,{0});")
+    # driver.execute_script(f"window.scrollBy(0,{0});")
 
     if client:
         # check existing data
