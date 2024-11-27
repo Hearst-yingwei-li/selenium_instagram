@@ -20,6 +20,7 @@ import json
 import os
 import logging
 from enum import Enum
+import requests
 
 # Configure logging to write to a file
 logging.basicConfig(
@@ -48,6 +49,11 @@ SCOPES = [
 ]
 SLEEP_MIN = 40
 SLEEP_MAX = 55
+# send message to slack channel/group
+
+SLACK_CHANNEL_MAIL = "aaaaovuxkzuchgnf7qmnfiasc4@hearstmedia.slack.com"
+SUBJECT = "[syssv037]Task Completed"
+# BODY = "The task has been completed successfully!"
 #
 obj_post_data = {}
 save_rows = []
@@ -58,6 +64,25 @@ post_view_height = None
 # To avoid Instagram API request restriction (200 api call/hour)
 sleep_needed = True
 creds = None
+
+
+def send_email_to_slack(media, start_date, end_date):
+    try:
+        # Create the email message
+        requests.post(
+            "https://sp.hearst.co.jp/miscellaneous/mail/send.php",
+            data={
+                "k": "99d168c18cc88e6af1f1057b7400fe88",
+                "title": f"[syssv037] {media}_{start_date.strftime("%Y-%m-%d")}_{end_date.strftime("%Y-%m-%d")}",
+                "body": "Task done: Insight data extraction",
+                "from": "yingwei.li@hearst.co.jp",
+                "to": SLACK_CHANNEL_MAIL,
+            },
+            verify=False,
+        )
+    except Exception as e:
+        print(f"Error sending email: {e}")
+        logging.debug(f"Error sending email: {e}")
 
 
 def is_pin_post(post_div):
@@ -103,18 +128,15 @@ async def get_post_time_spread(driver, obj_post, start_date, end_date):
             list_skip.append(obj_post["url"])
             # close_current_tab(driver, home_window)
             return EnumTimeSpread.LATER, post_time
-        # check if is pin post
         elif post_time < start_date:
+            # check if is pin post
             is_pin = obj_post["is_pin"]
             if is_pin:
                 list_skip.append(obj_post["url"])
-                # close_current_tab(driver, home_window)
                 return EnumTimeSpread.PIN_EARLIER, post_time
             else:
-                # close_current_tab(driver, home_window)
                 return EnumTimeSpread.EARLIER, post_time
         else:
-            # close_current_tab(driver, home_window)
             return EnumTimeSpread.MIDDLE, post_time
 
     except TimeoutException:
@@ -656,12 +678,15 @@ async def get_post_insight_data(driver, obj_post, start_date, end_date):
     )
     if enum_post_time == EnumTimeSpread.EARLIER:
         close_current_tab(driver, home_window)
+        print('check post time ---- earlier')
         return TAG_END_OF_LOOP
     elif enum_post_time == EnumTimeSpread.LATER:
         close_current_tab(driver, home_window)
+        print('check post time ---- later')
         return None
     elif enum_post_time == EnumTimeSpread.PIN_EARLIER:
         close_current_tab(driver, home_window)
+        print('check post time ---- pin earlier')
         return None
     else:
         json_output = {}
@@ -811,7 +836,7 @@ def check_existing_data(media, start_date, end_date):
 
 
 def save_to_spreadsheet(client, media, spreadsheet):
-    print(f"obj_post_data --\n{obj_post_data}")
+    # print(f"obj_post_data --\n{obj_post_data}")
 
     # Open the Google Spreadsheet (replace 'spreadsheet_name' with the actual name)
     # spreadsheet = client.open('Instagramインサイトデータ更新')
@@ -871,8 +896,10 @@ async def get_post_info(driver, media, start_date, end_date):
         )
 
         if insight_data == TAG_END_OF_LOOP:
+            print('end of loop')
             break
         elif insight_data == None:
+            print('insight data is None')
             continue
         else:
             obj_post_data.update({link: insight_data})
@@ -982,6 +1009,7 @@ async def execute(client, media, start_date, end_date):
         await get_post_info(driver, media, start_date, end_date)
         # save data to spread sheet
         save_to_spreadsheet(client, media, SPREAD_SHEET_NAME)
+        send_email_to_slack(media, start_date, end_date)
 
 
 async def run():
