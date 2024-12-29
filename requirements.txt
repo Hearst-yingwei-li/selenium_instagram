@@ -1,0 +1,5 @@
+google-auth
+selenium
+requests
+pywin32 
+pyinstaller
